@@ -12,8 +12,6 @@ import csv
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 解决个TF库没有编译，不能使用SSE、SSE2、FMA等指令，但是他们是可以加速你的CPU计算的问题
-# 载入mnist手写数据集:
-# from tensorflow.examples.tutorials.mnist import input_data
 
 """
 一些辅助函数:
@@ -49,13 +47,13 @@ def save(saver, sess, logdir, step):  # 保存模型的save函数
     model_name = 'model'  # 模型名前缀
     checkpoint_path = os.path.join(logdir, model_name)  # 保存路径
     saver.save(sess, checkpoint_path, global_step=step)  # 保存模型
-    print('------模型扫描已部署------.')
+    print('------模型参数已部署------.')
 
 
 """
 数据准备：
 加载光伏历史数据(csv类型文件)到GANs模型，并重新塑成可调的模型输入形状
-Label只对基于事件的场景生成有用
+label只对基于事件的场景生成有用
 """
 
 
@@ -159,7 +157,7 @@ class GAN:  # 创建一个GAN类
             dim_W1=1024,
             dim_W2=128,
             dim_W3=64,
-            dim_channel=1,  # 频道目前就一个
+            dim_channel=1,  
     ):
         self.batch_size = batch_size
         self.image_shape = image_shape
@@ -199,17 +197,17 @@ class GAN:  # 创建一个GAN类
         Z = tf.placeholder(tf.float32, [self.batch_size, self.dim_z])  # [32,100]32列100行噪声矩阵
         Y = tf.placeholder(tf.float32, [self.batch_size, self.dim_y])  # [32,y]特定事件矩阵
         image_real = tf.placeholder(tf.float32, [self.batch_size] + self.image_shape)
-        # 特征形状[32,24,24,1]的真实类图像矩阵
+        # 尺寸[32,24,24,1]的时序特征矩阵
 
         h4 = self.generate(Z, Y)
         # image_gen来自生成器的sigmoid输出
         image_gen = tf.nn.sigmoid(h4)
 
         raw_real2 = self.discriminate(image_real, Y)
-        p_real = tf.reduce_mean(raw_real2)  # 边际分布均值
+        p_real = tf.reduce_mean(raw_real2)  # 生成数据的reduce mean
 
         raw_gen2 = self.discriminate(image_gen, Y)
-        p_gen = tf.reduce_mean(raw_gen2)  # 边际分布均值
+        p_gen = tf.reduce_mean(raw_gen2)  # 真实数据的reduce mean
 
         discrim_cost = tf.reduce_sum(raw_real2) - tf.reduce_sum(raw_gen2)  # 边际分布的差值为W距离
         gen_cost = -tf.reduce_mean(raw_gen2)  #
@@ -320,16 +318,16 @@ class GAN:  # 创建一个GAN类
 使用W-DGGAN模型
 """
 
-n_epochs = 80  # 训练全部样本的世代次数；
+n_epochs = 80  # 训练遍历次数
 learning_rate = 0.0002  # 学习率
-batch_size = 32  # 一个batch中的样本总数为32
-image_shape = [24, 24, 1]  # 输入数据的特征形状
-dim_z = 100  # 噪声输入尺寸
+batch_size = 32  # batch数据载量
+image_shape = [24, 24, 1]  # 喂入model数据的尺寸
+dim_z = 100  # 噪声尺寸
 dim_W1 = 1024  # 输入层
-dim_W2 = 128  # 第二层
-dim_W3 = 64  # 第三层#8是使用的最大光伏量
-dim_channel = 1  # 为以后的多通道做准备
-mu, sigma = 0, 0.1  # 输入高斯分布
+dim_W2 = 128  # 中间层1
+dim_W3 = 64  # 中间层2
+dim_channel = 1  # 通道数
+mu, sigma = 0, 0.1  # 高斯分布
 events_num = 12  # 事件数量
 
 visualize_dim = 32
@@ -353,7 +351,7 @@ print("----------W_DCGAN模型初始化完毕----------")
 
 # Z_tf,Y_tf: 占位符
 # image_tf: 图像占位符
-# d_cost_tf, g_cost_tf: 鉴别器和发电机的成本#8是我们使用的机组光伏发电能力的最大值。
+# d_cost_tf, g_cost_tf: 鉴别器和发电机的成本
 # p_real, p_gen: 鉴别器的输出来判断真实的/生成的
 
 Z_tf, Y_tf, image_tf, d_cost_tf, g_cost_tf, p_real, p_gen = dcgan_model.build_model()
@@ -364,7 +362,8 @@ if not os.path.exists('out/'):  # 初始化训练过程中的可视化结果的�
 
 if not os.path.exists('snapshots/'):  # 初始化训练过程中的模型保存文件夹
     os.makedirs('snapshots/')
-#
+
+# 初始化模型参数
 discrim_vars = filter(lambda x: x.name.startswith('discrim'), tf.trainable_variables())
 gen_vars = filter(lambda x: x.name.startswith('gen'), tf.trainable_variables())
 discrim_vars = [i for i in discrim_vars]
@@ -381,7 +380,7 @@ tf.global_variables_initializer().run()
 Zs = np.random.normal(mu, sigma, size=[batch_size, dim_z]).astype(np.float32)
 Y_np_sample = OneHot(np.random.randint(events_num, size=[visualize_dim]), n=events_num)
 iterations = 0
-k = 3  # 控制D和G的相对训练次数，以求D和G的平衡
+k = 3  # 控制D和G的相对训练次数，保持训练过程平衡
 
 gen_loss_all = []
 P_real = []
@@ -407,7 +406,7 @@ for epoch in range(n_epochs):
         Xs = trX[start:end].reshape([-1, 24, 24, 1])
         Ys = trY2[start:end]
 
-        # 使用均匀分布或高斯分布的数据GANs模型样本
+        # 使用均匀分布或高斯分布的噪声数据作为GANs模型输入
         Zs = np.random.normal(mu, sigma, size=[batch_size, dim_z]).astype(np.float32)  # [32,100]
 
         # 对于每次迭代，都分别生成D和G, 交替次数k=3
@@ -478,7 +477,7 @@ with open('label.csv', 'w') as csvfile:
     writer = csv.writer(csvfile)
     writer.writerows(Y_np_sample)
 
-# 用图像显示真实场景与生成场景的loss
+# 图表展示真实场景与生成场景的loss
 print("P_real：", P_real)
 print("P_fake：", P_fake)
 
